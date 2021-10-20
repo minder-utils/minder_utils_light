@@ -27,6 +27,8 @@ def token_save(token):
 
 def set_delta(delta=1):
     '''
+    Only used in ```minder_utils``` and not ```minder_utils_lite```.
+
     This function allows you to save the delta. This is the number 
     of days before today that you want the data to go up until.
 
@@ -49,6 +51,8 @@ def set_delta(delta=1):
 
 def dates_save(refresh=False):
     '''
+    Only used in ```minder_utils``` and not ```minder_utils_lite```.
+
     This function saves the date range that you want to download the data for.
     When you have run ```minder_utils.settings.set_delta```, then you 
     would need to run this function to update the dates used in the weekly loading
@@ -60,7 +64,7 @@ def dates_save(refresh=False):
     if you wanted to only download the data between your last download settings and 
     now, you would use ```refresh=False```.
 
-    These settings only affect the ```minder_utils.scirpts.weekly_loader.Weekly_dataloader```
+    These settings only affect the ```minder_utils.scripts.weekly_loader.Weekly_dataloader```
     class.
 
     Arguments
@@ -106,7 +110,9 @@ def dates_save(refresh=False):
 
 def set_data_dir(path='./data/'):
     '''
-    This allows you to set the path to mappings.json, Patients.csv and UTIs-TP-TN.csv.
+    Only used in ```minder_utils``` and not ```minder_utils_lite```.
+
+    This allows you to set the path to ```mappings.json```, ```Patients.csv``` and ```UTIs-TP-TN.csv```.
 
     Arguments
     ---------

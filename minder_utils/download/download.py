@@ -3,13 +3,11 @@ import json
 import pandas as pd
 import io
 from pathlib import Path
-import importlib.resources as pkg_resources
 import sys
 import os
-from ..util import progress_spinner
+from minder_utils.util.util import progress_spinner, reformat_path, save_mkdir
 from minder_utils.configurations import token_path
 import numpy as np
-import datetime
 
 
 class Downloader:
@@ -202,9 +200,9 @@ class Downloader:
                 sys.stdout.write('\n')
                 waiting = False
 
-        return job_id_dict
+        return job_id_dict, request_url_dict
 
-    def export(self, since=None, until=None, reload=True, categories='all', save_path='./data/raw_data/', append = True):
+    def export(self, since=None, until=None, reload=True, categories='all', save_path='./data/raw_data/', append=True):
         '''
         This is a function that is able to download the data and save it as a csv in save_path.
 
@@ -251,11 +249,11 @@ class Downloader:
             If ```False```, the previous data will be overwritten if it exists.
 
         '''
-
+        save_path = reformat_path(save_path)
         p = Path(save_path)
         if not p.exists():
             print('Target directory does not exist, creating a new folder')
-            p.mkdir()
+            save_mkdir(save_path)
         if reload:
             self._export_request(categories=categories, since=since, until=until)
 
@@ -277,6 +275,7 @@ class Downloader:
                     print('Not a valid input')
                     export_index = int(input('Enter the index of the job ...'))
         print('Start to export job')
+        categories_downloaded = []
         for idx, record in enumerate(data[export_index]['jobRecord']['output']):
             print('Exporting {}/{}'.format(idx + 1, len(data[export_index]['jobRecord']['output'])).ljust(20, ' '),
                   str(record['type']).ljust(20, ' '), end=' ')
@@ -284,11 +283,17 @@ class Downloader:
             if content.status_code != 200:
                 print('Fail, Response code {}'.format(content.status_code))
             else:
-                mode = 'a' if append else 'w'
-                header = (not Path(os.path.join(save_path, record['type'] + '.csv')).exists()) or mode == 'w' 
-                pd.read_csv(io.StringIO(content.text)).to_csv(os.path.join(save_path, record['type'] + '.csv'), mode=mode,
+                if record['type'] in categories_downloaded:
+                    mode = 'a'
+                    header = False
+                else:
+                    mode = 'a' if append else 'w'
+                    header = not Path(os.path.join(save_path, record['type'] + '.csv')).exists() or mode == 'w'
+                
+                pd.read_csv(io.StringIO(content.text)).to_csv(os.path.join(save_path, record['type'] + '.csv'),
+                                                              mode=mode,
                                                               header=header)
-
+                categories_downloaded.append(record['type'])
                 print('Success')
 
     def refresh(self, until=None, categories=None, save_path='./data/raw_data/'):
@@ -316,7 +321,7 @@ class Downloader:
         
 
         '''
-
+        save_path = reformat_path(save_path)
         if categories is None:
             raise TypeError('Please supply at least one category...')
         if type(categories) == str:
@@ -341,36 +346,35 @@ class Downloader:
                     since = pd.to_datetime(data[['start_date']].iloc[0, 0])
                     # if the earliest date is after until, then we error
                     if self.convert_to_ISO(since) > self.convert_to_ISO(until):
-                        raise TypeError('Please check your inputs. For {} we found that you tried refreshing'\
-                            'to a date earlier than the earliest date in the file.'.format(category))
+                        raise TypeError('Please check your inputs. For {} we found that you tried refreshing' \
+                                        'to a date earlier than the earliest date in the file.'.format(category))
                     else:
                         mode_dict[category] = 'w'
-                else: 
+                else:
                     mode_dict[category] = 'a'
 
             export_dict[category] = (since, until)
 
-        job_id_dict = self._export_request_parallel(export_dict=export_dict)
+        job_id_dict, request_url_dict = self._export_request_parallel(export_dict=export_dict)
+
 
         data = requests.get(self.url + 'export', headers=self.params).json()
 
         for category in categories:
-            job_id = job_id_dict[category]
-            job_found = False
-            for previous_job in data[::-1]:
-                if previous_job['id'] == job_id:
-                    output = previous_job['jobRecord']['output']
-                    job_found = True
-                    break
 
-            if not job_found:
-                raise TypeError('Uh-oh! Something seems to have gone wrong.'\
-                    'Please check the inputs to the function and try again.')
+            if not category in  request_url_dict:
+                raise TypeError('Uh-oh! Something seems to have gone wrong.' \
+                                'Please check the inputs to the function and try again.' \
+                                ' Looks as if category {} caused the problem'.format(category))
+
+            content = requests.get(request_url_dict[category], headers=self.params)
+            output = json.load(io.StringIO(content.text))['jobRecord']['output']
+
 
             for n_output, data_chunk in enumerate(output):
                 content = requests.get(data_chunk['url'], headers=self.params)
                 sys.stdout.write('\r')
-                sys.stdout.write("For {}, exporting {}/{}".format(category, n_output+1,len(output)))
+                sys.stdout.write("For {}, exporting {}/{}".format(category, n_output + 1, len(output)))
                 sys.stdout.flush()
                 if content.status_code != 200:
                     sys.stdout.write('\n')
@@ -380,14 +384,31 @@ class Downloader:
                     sys.stdout.flush()
                 else:
                     current_data = pd.read_csv(io.StringIO(content.text))
-                    header = (not Path(save_path + category + '.csv').exists()) or mode_dict[category]  == 'w'
+                    
+                    if Path(save_path + category + '.csv').exists():
+                        data_to_save = pd.read_csv(save_path + category + '.csv', index_col=0)
+                        data_to_save = data_to_save.append(current_data, ignore_index=True)
+                        data_to_save = data_to_save.drop_duplicates(ignore_index=True)
+
+                    else:
+                        data_to_save = current_data
+
+                    '''
+                    header = (not Path(save_path + category + '.csv').exists()) or mode_dict[category] == 'w'
                     # checking whether the first line is a duplicate of the end of the previous file
                     if np.all(current_data[['start_date', 'id']].iloc[0, :] == last_rows[category]):
-                        current_data.iloc[1:, :].reset_index(drop=True).to_csv(save_path + category + '.csv', mode=mode_dict[category],
+                        current_data.iloc[1:, :].reset_index(drop=True).to_csv(save_path + category + '.csv',
+                                                                               mode=mode_dict[category],
                                                                                header=header)
                     else:
                         current_data.to_csv(save_path + category + '.csv', mode=mode_dict[category],
                                             header=header)
+                    '''
+
+                    data_to_save.to_csv(save_path + category + '.csv', mode='w',
+                                            header=True)
+
+
             sys.stdout.write('\n')
 
         print('Success')

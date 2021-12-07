@@ -8,7 +8,7 @@ PACKAGE_NAME = 'minder_utils'
 
 setup(
     name=PACKAGE_NAME,
-    version='0.0.2',
+    version='0.0.3',
     description='A package for loading the DRI data from Minder',
     author='UKDRI CR&T Imperial College London',
     author_email='',
@@ -18,6 +18,7 @@ setup(
     install_requires=["numpy==1.19.5",
                         "pandas==1.1.5",
                         "requests",
-                        "argparse"
+                        "argparse",
+                        "pyyaml"
     ]
 )
